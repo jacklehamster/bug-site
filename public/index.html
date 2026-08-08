@@ -90,6 +90,26 @@ body.flowmode .page-body{white-space:normal}
 .ln.pnum{text-align:right;color:var(--chalk-dim);margin:0 0 1.4em}
 .ln.blank{height:.5em}
 
+/* ---------- the song ----------
+   Sits between two script pages, in the page's own type. Silent until tapped;
+   preload="none" so the 2.7MB never downloads for readers who don't. */
+.track{margin:0 0 3.2em;padding:0 0 3.2em;border-bottom:1px solid var(--rule-soft)}
+.track-label{color:var(--red);font-size:10px;letter-spacing:.26em;text-transform:uppercase;
+  margin:0 0 12px}
+.track-btn{display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+  font:inherit;font-size:13px;letter-spacing:.08em;
+  background:none;border:1px solid var(--rule);color:var(--chalk);
+  padding:15px 17px;cursor:pointer;transition:border-color .2s,background .2s}
+.track-btn:hover{border-color:var(--chalk-dim);background:rgba(239,233,222,.03)}
+.track-btn:focus-visible{outline:2px solid var(--red);outline-offset:3px}
+.track-glyph{color:var(--red);width:1.1em;flex:none}
+.track-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track-time{margin-left:auto;flex:none;color:var(--chalk-dim);font-variant-numeric:tabular-nums}
+.track-rail{height:1px;background:var(--rule);margin-top:-1px}
+.track-fill{height:1px;width:0;background:var(--red);transition:width .15s linear}
+body.flowmode .track{margin-bottom:2.6em;padding-bottom:2.6em}
+body.flowmode .track-btn{font-size:12.5px;padding:14px 14px;gap:11px}
+
 /* ---------- end card ---------- */
 .endcard{border-top:1px solid var(--rule);margin-top:2vh;padding:9vh 0 2vh}
 .endcard h3{font-size:clamp(22px,5vw,30px);letter-spacing:.03em;margin:0 0 22px;font-weight:700}
@@ -173,15 +193,17 @@ const PAGES = ["               B U G\n       Excerpt — Scenes 1–14 of 26\n\n
 /* ---------------------------------------------------------------
    BUG — continuous-scroll reader
    PAGES (above) is untouched: 70 strings, fixed-width screenplay text.
+   PAGES[0] is the title page; PAGES[k] is script page k.
    No pagination UI, no page turns. Pages stack; you scroll.
    --------------------------------------------------------------- */
 
 const TOTAL = PAGES.length;
+const LAST_PAGE = TOTAL - 1;          /* title page isn't a numbered script page */
 const pagesEl  = document.getElementById('pages');
 const endcard  = document.getElementById('endcard');
 const counter  = document.getElementById('counter');
 const curEl    = document.getElementById('cur');
-document.getElementById('tot').textContent = TOTAL;
+document.getElementById('tot').textContent = LAST_PAGE;
 
 endcard.innerHTML =
     '<h3>That\'s where it stops.</h3>'
@@ -221,22 +243,90 @@ function flowHTML(text){
   return out.join('');
 }
 
-/* ---- build the shells up front; fill them lazily ---- */
+/* ---- the song ----
+   She writes it, then sings it with nothing under her, then a rough homemade
+   track comes up. It ends mid-page-51: last note, she stands in the dark, she
+   leaves. Then the script CUTs to the next morning. The player goes in that
+   gap — the scene break — not after the whole page, so nothing sits between
+   the end of the song and the button. */
+const SONG = {
+  page: 51,          /* script page 51 === PAGES[51] */
+  splitBefore: 49,   /* line index of "CUT TO:" — everything above is the song's scene */
+  file: '/timidgirl.mp3',
+  title: '"TIMID GIRL"',
+  seconds: 178.6
+};
+const mmss = s => (s < 0 || !isFinite(s)) ? '0:00'
+  : Math.floor(s/60) + ':' + String(Math.floor(s%60)).padStart(2,'0');
+
+/* ---- pages become blocks; the song page splits into two, player between ---- */
+const blocks = [];
+for(let n = 0; n < TOTAL; n++){
+  if(n === SONG.page){
+    const L = PAGES[n].split('\n');
+    blocks.push({ i:n, text: L.slice(0, SONG.splitBefore).join('\n') });
+    blocks.push({ i:n, text: L.slice(SONG.splitBefore).join('\n'), songBefore:true });
+  } else {
+    blocks.push({ i:n, text: PAGES[n] });
+  }
+}
+
 const shells = [];
 const frag = document.createDocumentFragment();
-for(let n=0; n<TOTAL; n++){
+blocks.forEach((b, k) => {
+  if(b.songBefore) frag.appendChild(buildPlayer());
   const art = document.createElement('article');
   art.className = 'page';
-  art.dataset.i = n;
+  art.dataset.i = b.i;      /* the printed page number this block belongs to */
+  art.dataset.b = k;
   /* reserve exact height from the real line count — mounting can't shift the scroll */
-  art.style.setProperty('--n', PAGES[n].split('\n').length);
+  art.style.setProperty('--n', b.text.split('\n').length);
   const body = document.createElement('div');
   body.className = 'page-body';
   art.appendChild(body);
   frag.appendChild(art);
   shells.push(body);
-}
+});
 pagesEl.appendChild(frag);
+wirePlayer();
+
+function buildPlayer(){
+  const box = document.createElement('div');
+  box.className = 'track';
+  box.innerHTML =
+      '<div class="track-label">The song</div>'
+    + '<button class="track-btn" id="trackBtn" aria-pressed="false">'
+    +   '<span class="track-glyph" id="trackGlyph">▶</span>'
+    +   '<span class="track-title">' + SONG.title + '</span>'
+    +   '<span class="track-time" id="trackTime">' + mmss(SONG.seconds) + '</span>'
+    + '</button>'
+    + '<div class="track-rail"><div class="track-fill" id="trackFill"></div></div>';
+  return box;
+}
+
+function wirePlayer(){
+  const btn = document.getElementById('trackBtn');
+  if(!btn) return;
+  const audio = new Audio();
+  audio.preload = 'none';            /* nothing downloads until they tap */
+  audio.src = SONG.file;
+  const glyph = document.getElementById('trackGlyph');
+  const time  = document.getElementById('trackTime');
+  const fill  = document.getElementById('trackFill');
+  const label = () => btn.setAttribute('aria-label',
+    (audio.paused ? 'Play ' : 'Pause ') + SONG.title.replace(/"/g,''));
+  label();
+
+  btn.onclick = () => { audio.paused ? audio.play().catch(()=>{}) : audio.pause(); };
+  audio.onplay  = () => { glyph.textContent='❚❚'; btn.setAttribute('aria-pressed','true');  label(); };
+  audio.onpause = () => { glyph.textContent='▶';  btn.setAttribute('aria-pressed','false'); label(); };
+  audio.ontimeupdate = () => {
+    const d = audio.duration || SONG.seconds;
+    time.textContent = mmss(audio.currentTime);
+    fill.style.width = Math.min(100, (audio.currentTime/d)*100) + '%';
+  };
+  audio.onended = () => { fill.style.width='0'; time.textContent = mmss(audio.duration || SONG.seconds); };
+}
 
 const mounted = new Set();
 
@@ -245,7 +335,7 @@ const mounted = new Set();
    height-per-line back into the reservation for everything not yet mounted. */
 let samples = [], calibrated = false;
 function calibrate(art, n){
-  if(calibrated || !flow || n < 40) return;          // skip the short title page
+  if(calibrated || !flow || n < 40) return;          // skip short blocks
   samples.push(art.getBoundingClientRect().height / n);
   if(samples.length < 6) return;
   samples.sort((a,b)=>a-b);
@@ -255,12 +345,12 @@ function calibrate(art, n){
   calibrated = true;
 }
 
-function mount(n){
-  if(mounted.has(n)) return;
-  mounted.add(n);
-  const el = shells[n], art = el.parentNode;
-  if(flow) el.innerHTML = flowHTML(PAGES[n]);
-  else { el.innerHTML = ''; el.textContent = PAGES[n]; }
+function mount(k){
+  if(mounted.has(k)) return;
+  mounted.add(k);
+  const el = shells[k], art = el.parentNode;
+  if(flow) el.innerHTML = flowHTML(blocks[k].text);
+  else { el.innerHTML = ''; el.textContent = blocks[k].text; }
   art.classList.add('on');
   calibrate(art, +getComputedStyle(art).getPropertyValue('--n'));
 }
@@ -268,21 +358,21 @@ function mount(n){
 /* mount well before it's on screen: two viewports of runway in each direction */
 const mounter = new IntersectionObserver((entries)=>{
   for(const e of entries){
-    if(e.isIntersecting) mount(+e.target.dataset.i);
+    if(e.isIntersecting) mount(+e.target.dataset.b);
   }
 }, {rootMargin: '200% 0px 200% 0px'});
-for(const art of pagesEl.children) mounter.observe(art);
+for(const art of pagesEl.querySelectorAll('.page')) mounter.observe(art);
 
-/* ---- page readout, driven by whichever page crosses the middle ---- */
+/* ---- page readout: the number actually printed on the page you're looking at ---- */
 const visible = new Set();
 const tracker = new IntersectionObserver((entries)=>{
   for(const e of entries){
     const n = +e.target.dataset.i;
     if(e.isIntersecting) visible.add(n); else visible.delete(n);
   }
-  if(visible.size) curEl.textContent = Math.min(...visible) + 1;
+  if(visible.size) curEl.textContent = Math.max(1, Math.min(...visible));
 }, {rootMargin: '-50% 0px -50% 0px'});
-for(const art of pagesEl.children) tracker.observe(art);
+for(const art of pagesEl.querySelectorAll('.page')) tracker.observe(art);
 
 /* the readout only exists while you're actually in the script */
 new IntersectionObserver(
@@ -304,7 +394,7 @@ addEventListener('resize', ()=>{
     document.body.classList.remove('calibrated');
     const again = [...mounted];
     mounted.clear();
-    for(const n of again){ shells[n].parentNode.classList.remove('on'); mount(n); }
+    for(const k of again){ shells[k].parentNode.classList.remove('on'); mount(k); }
   }, 140);
 });
 
